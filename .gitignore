@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+*.db
+*.sqlite
+*.sqlite3
+library_backup_*
+.vscode/
