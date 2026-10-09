@@ -41,9 +41,9 @@ def report_available_books():
 
 # ---------- Issue / Return ----------
 def report_issued_books():
-    headings = ["Issue ID", "Book", "Member", "Issue Date", "Due Date", "Status"]
+    headings = ["Issue ID", "Book", "Member", "Card ID", "Issue Date", "Due Date", "Status"]
     rows = get_rows("""
-        SELECT ir.issue_id, b.title, m.name,
+        SELECT ir.issue_id, b.title, m.name, COALESCE(m.card_id, '-'),
                ir.issue_date, ir.due_date, ir.status
         FROM issue_return ir
         JOIN books b   ON ir.book_id   = b.book_id
@@ -55,9 +55,9 @@ def report_issued_books():
 
 
 def report_returned_books():
-    headings = ["Issue ID", "Book", "Member", "Issue Date", "Returned On", "Overdue Days", "Fine"]
+    headings = ["Issue ID", "Book", "Member", "Card ID", "Issue Date", "Returned On", "Overdue Days", "Fine"]
     rows = get_rows("""
-        SELECT ir.issue_id, b.title, m.name, ir.issue_date,
+        SELECT ir.issue_id, b.title, m.name, COALESCE(m.card_id, '-'), ir.issue_date,
                COALESCE(ir.actual_return_date, ir.return_date),
                ir.overdue_days, ir.fine_amount
         FROM issue_return ir
@@ -70,9 +70,9 @@ def report_returned_books():
 
 
 def report_overdue_books():
-    headings = ["Issue ID", "Book", "Member", "Due Date", "Days Overdue"]
+    headings = ["Issue ID", "Book", "Member", "Card ID", "Due Date", "Days Overdue"]
     rows = get_rows("""
-        SELECT ir.issue_id, b.title, m.name, ir.due_date,
+        SELECT ir.issue_id, b.title, m.name, COALESCE(m.card_id, '-'), ir.due_date,
                CAST(julianday('now') - julianday(ir.due_date) AS INTEGER) AS days_late
         FROM issue_return ir
         JOIN books b   ON ir.book_id   = b.book_id
@@ -87,14 +87,15 @@ def report_overdue_books():
 
 # ---------- Members ----------
 def report_members():
-    headings = ["ID", "Name", "Phone", "Email", "Has Account", "Active"]
+    headings = ["ID", "Card ID", "Name", "Department", "Category", "Phone", "Email", "Portal Login"]
     rows = get_rows("""
-        SELECT m.member_id, m.name, m.phone, m.email,
-               CASE WHEN ma.account_id IS NULL THEN 'No' ELSE 'Yes' END,
+        SELECT m.member_id, COALESCE(m.card_id, '-'), m.name,
+               COALESCE(m.dept, 'CSE'), COALESCE(m.member_type, 'STUDENT'),
+               m.phone, m.email,
                CASE
-                   WHEN ma.account_id IS NULL THEN '-'
-                   WHEN ma.is_active = 1 THEN 'Yes'
-                   ELSE 'No'
+                   WHEN ma.account_id IS NULL THEN 'No Account'
+                   WHEN ma.is_active = 1 THEN 'Active'
+                   ELSE 'Disabled'
                END
         FROM members m
         LEFT JOIN member_accounts ma ON m.member_id = ma.member_id
@@ -104,9 +105,9 @@ def report_members():
 
 
 def report_member_borrowing(member_id=None):
-    headings = ["Issue ID", "Member", "Book", "Issued", "Returned", "Status", "Fine"]
+    headings = ["Issue ID", "Member", "Card ID", "Book", "Issued", "Returned", "Status", "Fine"]
     sql = """
-        SELECT ir.issue_id, m.name, b.title, ir.issue_date,
+        SELECT ir.issue_id, m.name, COALESCE(m.card_id, '-'), b.title, ir.issue_date,
                COALESCE(ir.actual_return_date, ir.return_date),
                ir.status, ir.fine_amount
         FROM issue_return ir

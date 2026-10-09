@@ -69,26 +69,32 @@ def main():
                 VALUES (?, ?, ?, ?, ?)
             """, (title, aid, cid, total, total))
 
-    # ---- Members ----
-    print("Inserting members...")
+    # ---- Students & Members ----
+    print("Inserting students & members...")
     members = [
-        ("Rahul Sharma",   "rahul@example.com",   "9876543210"),
-        ("Priya Verma",    "priya@example.com",   "9876501234"),
-        ("Aarav Naik",     "aarav@example.com",   "9123456780"),
-        ("Diya Shetty",    "diya@example.com",    "9123456781"),
-        ("Kabir Gowda",    "kabir@example.com",   "9123456782"),
-        ("Ananya Mesta",   "ananya@example.com",  "9123456783"),
-        ("Rohan Hegde",    "rohan@example.com",   "9123456784"),
-        ("Sneha Acharya",  "sneha@example.com",   "9123456785"),
-        ("Arjun Bhat",     "arjun@example.com",   "9123456786"),
-        ("Isha Kulkarni",  "isha@example.com",    "9123456787"),
+        ("Rahul Sharma",   "CSE 1", "CSE", "STUDENT", "rahul@example.com",   "9876543210"),
+        ("Priya Verma",    "CSE 2", "CSE", "STUDENT", "priya@example.com",   "9876501234"),
+        ("Aarav Naik",     "ME 1",  "ME",  "STUDENT", "aarav@example.com",   "9123456780"),
+        ("Diya Shetty",    "ME 2",  "ME",  "STUDENT", "diya@example.com",    "9123456781"),
+        ("Kabir Gowda",    "AE 1",  "AE",  "STUDENT", "kabir@example.com",   "9123456782"),
+        ("Ananya Mesta",   "AE 2",  "AE",  "STUDENT", "ananya@example.com",  "9123456783"),
+        ("Rohan Hegde",    "EE 1",  "EE",  "STUDENT", "rohan@example.com",   "9123456784"),
+        ("Sneha Acharya",  "EE 2",  "EE",  "STUDENT", "sneha@example.com",   "9123456785"),
+        ("Arjun Bhat",     "CSE 3", "CSE", "STUDENT", "arjun@example.com",   "9123456786"),
+        ("Isha Kulkarni",  "ME 3",  "ME",  "STUDENT", "isha@example.com",    "9123456787"),
     ]
-    for name, email, phone in members:
-        cur.execute("SELECT member_id FROM members WHERE email = ?", (email,))
-        if cur.fetchone() is None:
+    for name, card_id, dept, mtype, email, phone in members:
+        cur.execute("SELECT member_id FROM members WHERE email = ? OR card_id = ?", (email, card_id))
+        row = cur.fetchone()
+        if row is None:
             cur.execute(
-                "INSERT INTO members (name, email, phone) VALUES (?, ?, ?)",
-                (name, email, phone)
+                "INSERT INTO members (name, card_id, dept, member_type, email, phone) VALUES (?, ?, ?, ?, ?, ?)",
+                (name, card_id, dept, mtype, email, phone)
+            )
+        else:
+            cur.execute(
+                "UPDATE members SET card_id = ?, dept = ?, member_type = ? WHERE member_id = ?",
+                (card_id, dept, mtype, row[0])
             )
 
     # ---- Magazines ----
@@ -136,7 +142,7 @@ def main():
     n = cur.execute("SELECT COUNT(*) FROM newspapers").fetchone()[0]
 
     conn.close()
-    print(f"\n✅ Sample data inserted:")
+    print(f"\n[OK] Sample data inserted:")
     print(f"   Books:      {b}")
     print(f"   Members:    {m}")
     print(f"   Magazines:  {mag}")

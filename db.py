@@ -25,6 +25,16 @@ def _get_app_dir():
 
 DB_NAME = os.path.join(_get_app_dir(), "library.db")
 
+# If running as PyInstaller .exe and local DB doesn't exist, extract bundled sample DB
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    bundled_db = os.path.join(sys._MEIPASS, "library.db")
+    if os.path.isfile(bundled_db) and not os.path.isfile(DB_NAME):
+        try:
+            import shutil
+            shutil.copyfile(bundled_db, DB_NAME)
+        except Exception:
+            pass
+
 
 # ------------------------------------------------------------
 # 1. Open a connection to the database
@@ -128,12 +138,25 @@ def setup_database():
     # ----- members -----
     cur.execute("""
         CREATE TABLE IF NOT EXISTS members (
-            member_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name      TEXT NOT NULL,
-            email     TEXT UNIQUE,
-            phone     TEXT NOT NULL
+            member_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            card_id     TEXT UNIQUE,
+            name        TEXT NOT NULL,
+            dept        TEXT NOT NULL DEFAULT 'CSE',
+            member_type TEXT NOT NULL DEFAULT 'STUDENT',
+            email       TEXT UNIQUE,
+            phone       TEXT NOT NULL
         )
     """)
+
+    # Safe migration: ensure existing tables get new columns
+    cur.execute("PRAGMA table_info(members)")
+    m_cols = [c[1] for c in cur.fetchall()]
+    if "card_id" not in m_cols:
+        cur.execute("ALTER TABLE members ADD COLUMN card_id TEXT")
+    if "dept" not in m_cols:
+        cur.execute("ALTER TABLE members ADD COLUMN dept TEXT NOT NULL DEFAULT 'CSE'")
+    if "member_type" not in m_cols:
+        cur.execute("ALTER TABLE members ADD COLUMN member_type TEXT NOT NULL DEFAULT 'STUDENT'")
 
     # ----- issue_return (with fine-related columns) -----
     cur.execute("""
@@ -279,6 +302,29 @@ def setup_database():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_ir_due         ON issue_return(due_date)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_fines_status   ON fines(status)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON activity_logs(timestamp)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_members_card   ON members(card_id)")
+
+    # Backfill card_id and dept for any legacy members without card_id
+    cur.execute("SELECT member_id, name FROM members WHERE card_id IS NULL OR card_id = ''")
+    unassigned = cur.fetchall()
+    if unassigned:
+        dept_cycle = ["CSE", "ME", "AE", "EE"]
+        for idx, (mid, mname) in enumerate(unassigned):
+            d = dept_cycle[idx % len(dept_cycle)]
+            cur.execute("SELECT card_id FROM members WHERE dept = ? AND card_id IS NOT NULL", (d,))
+            existing_cids = [r[0] for r in cur.fetchall()]
+            next_num = 1
+            for cid in existing_cids:
+                if cid and cid.startswith(d):
+                    parts = cid.replace("-", " ").split()
+                    for p in parts:
+                        if p.isdigit():
+                            next_num = max(next_num, int(p) + 1)
+            cid_val = f"{d} {next_num}"
+            cur.execute(
+                "UPDATE members SET dept = ?, card_id = ?, member_type = 'STUDENT' WHERE member_id = ?",
+                (d, cid_val, mid)
+            )
 
     conn.commit()
 
@@ -321,7 +367,39 @@ def setup_database():
 
 
 # ------------------------------------------------------------
-# 6. Run this file directly to create the database.
+# 6. Card ID Generation Helper
+# ------------------------------------------------------------
+def get_next_card_id(dept="CSE"):
+    """
+    Computes the next sequence number for a department Card ID.
+    e.g. if 'ME 1', 'ME 2' exist, returns 'ME 3'.
+    Works for CSE, ME, AE, EE or any department prefix.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    dept_clean = (dept or "CSE").strip().upper()
+    cur.execute(
+        "SELECT card_id FROM members WHERE card_id LIKE ? OR dept = ?",
+        (f"{dept_clean}%", dept_clean)
+    )
+    rows = cur.fetchall()
+    conn.close()
+
+    max_num = 0
+    for (cid,) in rows:
+        if not cid:
+            continue
+        parts = cid.strip().replace("-", " ").split()
+        for p in parts:
+            if p.isdigit():
+                max_num = max(max_num, int(p))
+                break
+
+    return f"{dept_clean} {max_num + 1}"
+
+
+# ------------------------------------------------------------
+# 7. Run this file directly to create the database.
 # ------------------------------------------------------------
 if __name__ == "__main__":
     setup_database()

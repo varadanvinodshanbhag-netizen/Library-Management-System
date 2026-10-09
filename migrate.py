@@ -95,8 +95,13 @@ def run_migration():
         safe_add_column(cur, "issue_return", "fine_status", "TEXT DEFAULT 'NONE'")
         safe_add_column(cur, "issue_return", "extension_count", "INTEGER DEFAULT 0")
 
+        print("\n[3] Updating 'members' table...")
+        safe_add_column(cur, "members", "card_id", "TEXT")
+        safe_add_column(cur, "members", "dept", "TEXT DEFAULT 'CSE'")
+        safe_add_column(cur, "members", "member_type", "TEXT DEFAULT 'STUDENT'")
+
         # -------- Create new tables --------
-        print("\n[3] Creating new tables...")
+        print("\n[4] Creating new tables...")
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS member_accounts (

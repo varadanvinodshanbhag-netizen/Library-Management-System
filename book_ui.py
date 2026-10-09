@@ -1,12 +1,18 @@
 # ============================================================
 # book_ui.py
-# Book Management screen: add / update / delete / display.
+# Book Inventory Management Screen.
+# Action buttons placed directly adjacent to form for immediate visibility.
 # ============================================================
 
 import tkinter as tk
 from tkinter import ttk, messagebox
 
 from db import run_query, get_rows, get_one
+from ui_helpers import (
+    COLORS, FONTS, PAD, section_title, make_table,
+    styled_entry, primary_button, success_button, danger_button, neutral_button,
+    populate_tree_with_striping, show_success, show_error, show_warning, ask_confirm
+)
 
 
 def get_or_create_author(author_name):
@@ -29,68 +35,128 @@ def show_books_screen(parent):
     for widget in parent.winfo_children():
         widget.destroy()
 
-    tk.Label(parent, text="Book Management", font=("Arial", 16, "bold"), bg="white").pack(pady=8)
+    section_title(parent, "Book Inventory Management", "Register, update, and manage cataloged books")
 
-    # ---------- Form ----------
-    form = tk.Frame(parent, bg="white")
-    form.pack(pady=5)
+    # ---------- Top Summary Bar ----------
+    summary_bar = tk.Frame(parent, bg=COLORS["card"])
+    summary_bar.pack(fill="x", padx=PAD["section_x"], pady=(0, 6))
 
-    tk.Label(form, text="Title", bg="white").grid(row=0, column=0, padx=6, pady=4, sticky="e")
-    title_entry = tk.Entry(form, width=28)
-    title_entry.grid(row=0, column=1, padx=6, pady=4)
+    stats_inner = tk.Frame(summary_bar, bg=COLORS["card_alt"],
+                           highlightbackground=COLORS["border"],
+                           highlightthickness=1)
+    stats_inner.pack(fill="x", ipady=3)
 
-    tk.Label(form, text="Author", bg="white").grid(row=0, column=2, padx=6, pady=4, sticky="e")
-    author_entry = tk.Entry(form, width=28)
-    author_entry.grid(row=0, column=3, padx=6, pady=4)
+    stat_lbl = tk.Label(
+        stats_inner,
+        text="Loading catalog metrics...",
+        font=FONTS["small_b"],
+        bg=COLORS["card_alt"],
+        fg=COLORS["text_secondary"]
+    )
+    stat_lbl.pack(side="left", padx=12)
 
-    tk.Label(form, text="Category", bg="white").grid(row=1, column=0, padx=6, pady=4, sticky="e")
-    category_entry = tk.Entry(form, width=28)
-    category_entry.grid(row=1, column=1, padx=6, pady=4)
-
-    tk.Label(form, text="Total Copies", bg="white").grid(row=1, column=2, padx=6, pady=4, sticky="e")
-    copies_entry = tk.Entry(form, width=28)
-    copies_entry.grid(row=1, column=3, padx=6, pady=4)
-
-    # ---------- Table ----------
-    table_frame = tk.Frame(parent, bg="white")
-    table_frame.pack(fill="both", expand=True, padx=10, pady=10)
-
-    columns = ("id", "title", "author", "category", "total", "available")
-    tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=12)
-
-    tree.heading("id", text="ID")
-    tree.heading("title", text="Title")
-    tree.heading("author", text="Author")
-    tree.heading("category", text="Category")
-    tree.heading("total", text="Total")
-    tree.heading("available", text="Available")
-
-    tree.column("id", width=50, anchor="center")
-    tree.column("title", width=200)
-    tree.column("author", width=160)
-    tree.column("category", width=140)
-    tree.column("total", width=70, anchor="center")
-    tree.column("available", width=90, anchor="center")
-
-    scroll = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
-    tree.configure(yscrollcommand=scroll.set)
-
-    tree.pack(side="left", fill="both", expand=True)
-    scroll.pack(side="right", fill="y")
-
-    def refresh_table():
-        for item in tree.get_children():
-            tree.delete(item)
-        rows = get_rows("""
-            SELECT b.book_id, b.title, a.author_name, c.category_name,
-                   b.total_copies, b.available_copies
-            FROM books b
-            JOIN authors a    ON b.author_id = a.author_id
-            JOIN categories c ON b.category_id = c.category_id
-            ORDER BY b.book_id
+    def refresh_stats():
+        row = get_one("""
+            SELECT COUNT(book_id), COALESCE(SUM(total_copies), 0), COALESCE(SUM(available_copies), 0)
+            FROM books
         """)
-        for row in rows:
-            tree.insert("", tk.END, values=row)
+        titles = row[0] if row else 0
+        total = row[1] if row else 0
+        avail = row[2] if row else 0
+        issued = total - avail
+        stat_lbl.config(
+            text=f"📚 Catalog: {titles} Titles   |   Total Stock: {total} Copies   |   "
+                 f"Available: {avail}   |   On Loan: {issued}"
+        )
+
+    # ---------- Form Card ----------
+    form_card = tk.Frame(
+        parent, bg=COLORS["card"],
+        highlightbackground=COLORS["border"],
+        highlightthickness=1
+    )
+    form_card.pack(fill="x", padx=PAD["section_x"], pady=(0, 6))
+
+    form_grid = tk.Frame(form_card, bg=COLORS["card"])
+    form_grid.pack(padx=14, pady=8, fill="x")
+
+    # Row 0: Title & Author
+    tk.Label(form_grid, text="Title *", bg=COLORS["card"],
+             fg=COLORS["text_secondary"], font=FONTS["small_b"]
+             ).grid(row=0, column=0, sticky="w", padx=(0, 4), pady=2)
+    title_entry = styled_entry(form_grid, width=30)
+    title_entry.grid(row=0, column=1, sticky="w", padx=(0, 16), pady=2, ipady=3)
+
+    tk.Label(form_grid, text="Author *", bg=COLORS["card"],
+             fg=COLORS["text_secondary"], font=FONTS["small_b"]
+             ).grid(row=0, column=2, sticky="w", padx=(0, 4), pady=2)
+    author_entry = styled_entry(form_grid, width=28)
+    author_entry.grid(row=0, column=3, sticky="w", padx=(0, 8), pady=2, ipady=3)
+
+    # Row 1: Category & Total Copies
+    tk.Label(form_grid, text="Category *", bg=COLORS["card"],
+             fg=COLORS["text_secondary"], font=FONTS["small_b"]
+             ).grid(row=1, column=0, sticky="w", padx=(0, 4), pady=2)
+    category_entry = styled_entry(form_grid, width=30)
+    category_entry.grid(row=1, column=1, sticky="w", padx=(0, 16), pady=2, ipady=3)
+
+    tk.Label(form_grid, text="Copies *", bg=COLORS["card"],
+             fg=COLORS["text_secondary"], font=FONTS["small_b"]
+             ).grid(row=1, column=2, sticky="w", padx=(0, 4), pady=2)
+    copies_entry = styled_entry(form_grid, width=12)
+    copies_entry.grid(row=1, column=3, sticky="w", padx=(0, 8), pady=2, ipady=3)
+
+    # ---------- Action Buttons Toolbar (PACKED BEFORE TABLE FOR IMMEDIATE ACCESS) ----------
+    button_row = tk.Frame(form_card, bg=COLORS["card_alt"], height=38)
+    button_row.pack(fill="x", padx=1, pady=(6, 0), ipady=3)
+
+    # Search filter on left of button row
+    tk.Label(button_row, text=" Filter:", bg=COLORS["card_alt"],
+             fg=COLORS["text_muted"], font=FONTS["small_b"]).pack(side="left", padx=(10, 4))
+    filter_entry = styled_entry(button_row, width=18)
+    filter_entry.pack(side="left", ipady=2, padx=(0, 14))
+
+    # Action Buttons on right of toolbar
+    success_button(button_row, "➕ Add Book",   lambda: add_book(),      width=12).pack(side="left", padx=3)
+    primary_button(button_row, "💾 Update",     lambda: update_book(),   width=11).pack(side="left", padx=3)
+    danger_button (button_row, "🗑️ Delete",     lambda: delete_book(),   width=11).pack(side="left", padx=3)
+    neutral_button(button_row, "🔄 Clear",      lambda: clear_form(),    width=10).pack(side="left", padx=3)
+    neutral_button(button_row, "🔁 Refresh",    lambda: refresh_table(), width=10).pack(side="left", padx=3)
+
+    # ---------- Table Setup (AT BOTTOM WITH SCROLLBAR) ----------
+    columns = ("id", "title", "author", "category", "total", "available")
+    headings = ("Book ID", "Title", "Author", "Category", "Total Copies", "Available")
+    widths = (65, 260, 200, 160, 95, 95)
+
+    tree = make_table(parent, columns, headings, widths, height=8)
+
+    # ---------- Action Functions ----------
+    def refresh_table():
+        kw = filter_entry.get().strip()
+        if kw:
+            rows = get_rows("""
+                SELECT b.book_id, b.title, a.author_name, c.category_name,
+                       b.total_copies, b.available_copies
+                FROM books b
+                JOIN authors a    ON b.author_id = a.author_id
+                JOIN categories c ON b.category_id = c.category_id
+                WHERE b.title LIKE ? OR a.author_name LIKE ? OR c.category_name LIKE ?
+                ORDER BY b.book_id DESC
+            """, (f"%{kw}%", f"%{kw}%", f"%{kw}%"))
+        else:
+            rows = get_rows("""
+                SELECT b.book_id, b.title, a.author_name, c.category_name,
+                       b.total_copies, b.available_copies
+                FROM books b
+                JOIN authors a    ON b.author_id = a.author_id
+                JOIN categories c ON b.category_id = c.category_id
+                ORDER BY b.book_id DESC
+            """)
+
+        populate_tree_with_striping(tree, rows)
+        refresh_stats()
+
+    filter_entry.bind("<KeyRelease>", lambda e: refresh_table())
 
     def clear_form():
         title_entry.delete(0, tk.END)
@@ -105,11 +171,11 @@ def show_books_screen(parent):
         category = category_entry.get().strip()
         copies_text = copies_entry.get().strip()
 
-        if title == "" or author == "" or category == "" or copies_text == "":
-            messagebox.showwarning("Warning", "Please fill all fields.")
+        if not title or not author or not category or not copies_text:
+            show_warning("Missing Fields", "Please complete all required fields.")
             return
         if not copies_text.isdigit() or int(copies_text) < 1:
-            messagebox.showerror("Error", "Total copies must be a positive number.")
+            show_error("Validation Error", "Total copies must be a positive integer.")
             return
 
         copies = int(copies_text)
@@ -121,7 +187,7 @@ def show_books_screen(parent):
             (title, author_id)
         )
         if existing is not None:
-            messagebox.showerror("Error", "This book already exists.")
+            show_error("Duplicate Entry", "This book is already in the inventory.")
             return
 
         run_query(
@@ -129,14 +195,14 @@ def show_books_screen(parent):
             "VALUES (?, ?, ?, ?, ?)",
             (title, author_id, category_id, copies, copies)
         )
-        messagebox.showinfo("Success", "Book added.")
+        show_success("Book Added", f"'{title}' was added successfully.")
         clear_form()
         refresh_table()
 
     def update_book():
         selected = tree.selection()
         if not selected:
-            messagebox.showwarning("Warning", "Select a book from the table first.")
+            show_warning("Selection Required", "Select a book from the table to update.")
             return
 
         book_id = tree.item(selected[0])["values"][0]
@@ -145,11 +211,11 @@ def show_books_screen(parent):
         category = category_entry.get().strip()
         copies_text = copies_entry.get().strip()
 
-        if title == "" or author == "" or category == "" or copies_text == "":
-            messagebox.showwarning("Warning", "Please fill all fields.")
+        if not title or not author or not category or not copies_text:
+            show_warning("Missing Fields", "Please complete all required fields.")
             return
         if not copies_text.isdigit() or int(copies_text) < 1:
-            messagebox.showerror("Error", "Total copies must be a positive number.")
+            show_error("Validation Error", "Total copies must be a positive integer.")
             return
 
         new_total = int(copies_text)
@@ -161,9 +227,9 @@ def show_books_screen(parent):
         issued = old_total - old_available
 
         if new_total < issued:
-            messagebox.showerror(
-                "Error",
-                f"Cannot reduce total below {issued} (copies currently issued)."
+            show_error(
+                "Quantity Conflict",
+                f"Cannot reduce total below {issued} (copies currently on loan)."
             )
             return
 
@@ -176,14 +242,14 @@ def show_books_screen(parent):
             "total_copies = ?, available_copies = ? WHERE book_id = ?",
             (title, author_id, category_id, new_total, new_available, book_id)
         )
-        messagebox.showinfo("Success", "Book updated.")
+        show_success("Updated", f"Book #{book_id} details updated.")
         clear_form()
         refresh_table()
 
     def delete_book():
         selected = tree.selection()
         if not selected:
-            messagebox.showwarning("Warning", "Select a book from the table first.")
+            show_warning("Selection Required", "Select a book from the table to delete.")
             return
 
         values = tree.item(selected[0])["values"]
@@ -195,19 +261,19 @@ def show_books_screen(parent):
             (book_id,)
         )
         if row[0] != row[1]:
-            messagebox.showerror("Error", "Cannot delete: some copies are currently issued.")
+            show_error("Cannot Delete", "Some copies of this book are currently issued.")
             return
 
         history = get_one("SELECT COUNT(*) FROM issue_return WHERE book_id = ?", (book_id,))
         if history[0] > 0:
-            messagebox.showerror("Error", "Cannot delete: this book has issue/return history.")
+            show_error("Cannot Delete", "This book has active or historic loan records.")
             return
 
-        if not messagebox.askyesno("Confirm", f"Delete '{book_title}' ?"):
+        if not ask_confirm("Confirm Deletion", f"Permanently delete '{book_title}' (ID #{book_id})?"):
             return
 
         run_query("DELETE FROM books WHERE book_id = ?", (book_id,))
-        messagebox.showinfo("Success", "Book deleted.")
+        show_success("Deleted", "Book deleted successfully.")
         clear_form()
         refresh_table()
 
@@ -222,14 +288,5 @@ def show_books_screen(parent):
         copies_entry.delete(0, tk.END);   copies_entry.insert(0, values[4])
 
     tree.bind("<<TreeviewSelect>>", on_row_select)
-
-    button_row = tk.Frame(parent, bg="white")
-    button_row.pack(pady=6)
-
-    tk.Button(button_row, text="Add Book",   width=12, command=add_book).grid(row=0, column=0, padx=5)
-    tk.Button(button_row, text="Update",     width=12, command=update_book).grid(row=0, column=1, padx=5)
-    tk.Button(button_row, text="Delete",     width=12, command=delete_book).grid(row=0, column=2, padx=5)
-    tk.Button(button_row, text="Clear Form", width=12, command=clear_form).grid(row=0, column=3, padx=5)
-    tk.Button(button_row, text="Refresh",    width=12, command=refresh_table).grid(row=0, column=4, padx=5)
 
     refresh_table()

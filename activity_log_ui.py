@@ -1,6 +1,7 @@
 # ============================================================
 # activity_log_ui.py
-# Admin screen: view and filter the activity log.
+# Administrator Portal: System Security & Activity Audit Log.
+# Action buttons placed directly adjacent to controls for immediate visibility.
 # ============================================================
 
 import tkinter as tk
@@ -8,12 +9,12 @@ from tkinter import ttk, filedialog, messagebox
 import csv
 from datetime import datetime
 
-from db import get_rows
+from db import get_rows, run_query
 from activity_log import log_action
 from ui_helpers import (
-    COLORS, FONTS, section_title, make_table,
-    primary_button, success_button, neutral_button,
-    show_success, show_error, show_warning, ask_confirm
+    COLORS, FONTS, PAD, section_title, make_table, styled_entry,
+    primary_button, success_button, danger_button, neutral_button,
+    populate_tree_with_striping, show_success, show_error, show_warning, ask_confirm
 )
 
 
@@ -21,57 +22,63 @@ def show_activity_log_screen(parent, admin_id=None):
     for w in parent.winfo_children():
         w.destroy()
 
-    section_title(parent, "Activity Log", "Track important actions in the system")
+    section_title(
+        parent,
+        "System Security & Audit Activity Log",
+        "Chronological ledger of user logins, circulation transactions, fine payments, and system events"
+    )
 
-    # ---------- Filter bar ----------
-    filter_frame = tk.Frame(parent, bg=COLORS["card"])
-    filter_frame.pack(fill="x", padx=20, pady=(5, 10))
+    # ---------- Filter Bar Card (PACKED BEFORE TABLE) ----------
+    filter_card = tk.Frame(parent, bg=COLORS["card_alt"],
+                           highlightbackground=COLORS["border"], highlightthickness=1)
+    filter_card.pack(fill="x", padx=PAD["section_x"], pady=(0, 6), ipady=3)
 
-    tk.Label(filter_frame, text="User type:", bg=COLORS["card"],
-             font=FONTS["body"]).grid(row=0, column=0, padx=(0, 5), pady=4)
-
+    # Actor Filter
+    tk.Label(filter_card, text=" Actor:", bg=COLORS["card_alt"],
+             fg=COLORS["text_muted"], font=FONTS["small_b"]).grid(row=0, column=0, padx=(10, 2), pady=3)
     user_var = tk.StringVar(value="ALL")
-    ttk.Combobox(
-        filter_frame, textvariable=user_var, width=10,
+    user_combo = ttk.Combobox(
+        filter_card, textvariable=user_var, width=8,
         values=["ALL", "ADMIN", "MEMBER", "SYSTEM"], state="readonly"
-    ).grid(row=0, column=1, padx=(0, 15))
+    )
+    user_combo.grid(row=0, column=1, padx=(0, 8), pady=3)
 
-    tk.Label(filter_frame, text="Action contains:", bg=COLORS["card"],
-             font=FONTS["body"]).grid(row=0, column=2, padx=(0, 5), pady=4)
-    action_entry = tk.Entry(filter_frame, width=20, font=FONTS["body"],
-                            relief="solid", bd=1)
-    action_entry.grid(row=0, column=3, padx=(0, 15), ipady=3)
+    # Action Keyword
+    tk.Label(filter_card, text="Keyword:", bg=COLORS["card_alt"],
+             fg=COLORS["text_muted"], font=FONTS["small_b"]).grid(row=0, column=2, padx=(0, 2), pady=3)
+    action_entry = styled_entry(filter_card, width=14)
+    action_entry.grid(row=0, column=3, padx=(0, 8), pady=3, ipady=2)
 
-    tk.Label(filter_frame, text="Date (YYYY-MM-DD):", bg=COLORS["card"],
-             font=FONTS["body"]).grid(row=0, column=4, padx=(0, 5), pady=4)
-    date_entry = tk.Entry(filter_frame, width=14, font=FONTS["body"],
-                          relief="solid", bd=1)
-    date_entry.grid(row=0, column=5, padx=(0, 15), ipady=3)
+    # Date
+    tk.Label(filter_card, text="Date:", bg=COLORS["card_alt"],
+             fg=COLORS["text_muted"], font=FONTS["small_b"]).grid(row=0, column=4, padx=(0, 2), pady=3)
+    date_entry = styled_entry(filter_card, width=11)
+    date_entry.grid(row=0, column=5, padx=(0, 8), pady=3, ipady=2)
 
-    tk.Label(filter_frame, text="Limit:", bg=COLORS["card"],
-             font=FONTS["body"]).grid(row=0, column=6, padx=(0, 5), pady=4)
+    # Limit
+    tk.Label(filter_card, text="Limit:", bg=COLORS["card_alt"],
+             fg=COLORS["text_muted"], font=FONTS["small_b"]).grid(row=0, column=6, padx=(0, 2), pady=3)
     limit_var = tk.StringVar(value="200")
-    ttk.Combobox(
-        filter_frame, textvariable=limit_var, width=8,
+    limit_combo = ttk.Combobox(
+        filter_card, textvariable=limit_var, width=6,
         values=["50", "100", "200", "500", "1000"], state="readonly"
-    ).grid(row=0, column=7, padx=(0, 10))
+    )
+    limit_combo.grid(row=0, column=7, padx=(0, 8), pady=3)
 
-    # ---------- Bottom buttons (packed BEFORE table) ----------
-    btn_row = tk.Frame(parent, bg=COLORS["card"])
-    btn_row.pack(side="bottom", pady=(5, 12))
+    neutral_button(filter_card, "Filter", lambda: refresh(), width=8).grid(row=0, column=8, padx=2)
+    success_button(filter_card, "📥 Export", lambda: export_csv(), width=10).grid(row=0, column=9, padx=2)
+    danger_button (filter_card, "🧹 Purge >30d", lambda: clear_old_logs(), width=12).grid(row=0, column=10, padx=2)
+    neutral_button(filter_card, "🔁 Refresh", lambda: refresh(), width=9).grid(row=0, column=11, padx=2)
 
-    # ---------- Table ----------
+    # ---------- Table Setup (AT BOTTOM) ----------
     cols = ("log_id", "time", "user_type", "user_id", "action", "details")
-    heads = ("ID", "Timestamp", "User Type", "User ID", "Action", "Details")
-    widths = (60, 150, 90, 70, 180, 500)
+    heads = ("Log ID", "Timestamp", "Actor Role", "User ID", "Action Code", "Transaction Event Details")
+    widths = (65, 140, 85, 75, 170, 480)
 
-    tree = make_table(parent, cols, heads, widths, height=14)
+    tree = make_table(parent, cols, heads, widths, height=9)
 
-    # ---------- Refresh ----------
+    # ---------- Data Operations ----------
     def refresh():
-        for item in tree.get_children():
-            tree.delete(item)
-
         sql = "SELECT log_id, timestamp, user_type, user_id, action, details FROM activity_logs WHERE 1=1"
         params = []
 
@@ -79,25 +86,38 @@ def show_activity_log_screen(parent, admin_id=None):
             sql += " AND user_type = ?"
             params.append(user_var.get())
 
-        if action_entry.get().strip():
+        act_kw = action_entry.get().strip()
+        if act_kw:
             sql += " AND action LIKE ?"
-            params.append(f"%{action_entry.get().strip()}%")
+            params.append(f"%{act_kw}%")
 
-        if date_entry.get().strip():
+        d_str = date_entry.get().strip()
+        if d_str:
             sql += " AND date(timestamp) = date(?)"
-            params.append(date_entry.get().strip())
+            params.append(d_str)
 
         try:
-            limit = int(limit_var.get())
+            lim = int(limit_var.get())
         except ValueError:
-            limit = 200
-        sql += f" ORDER BY log_id DESC LIMIT {limit}"
+            lim = 200
+        sql += f" ORDER BY log_id DESC LIMIT {lim}"
 
-        rows = get_rows(sql, tuple(params))
-        for r in rows:
-            tree.insert("", tk.END, values=r)
+        raw_rows = get_rows(sql, tuple(params))
+        formatted_rows = []
+        for r in raw_rows:
+            lid, ts, u_type, uid, action, det = r
+            uid_str = f"#{uid}" if uid else "SYSTEM"
+            formatted_rows.append((
+                f"#{lid}",
+                ts or "-",
+                u_type,
+                uid_str,
+                action,
+                det or "-"
+            ))
 
-    # ---------- Actions ----------
+        populate_tree_with_striping(tree, formatted_rows)
+
     def clear_filters():
         user_var.set("ALL")
         action_entry.delete(0, tk.END)
@@ -108,13 +128,14 @@ def show_activity_log_screen(parent, admin_id=None):
     def export_csv():
         rows = [tree.item(i)["values"] for i in tree.get_children()]
         if not rows:
-            show_warning("Warning", "Nothing to export.")
+            show_warning("Empty Table", "No log rows are available to export.")
             return
 
         fname = filedialog.asksaveasfilename(
-            parent=parent, defaultextension=".csv",
-            filetypes=[("CSV file", "*.csv")],
-            initialfile=f"activity_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            parent=parent,
+            defaultextension=".csv",
+            filetypes=[("CSV Spreadsheet", "*.csv"), ("All Files", "*.*")],
+            initialfile=f"activity_audit_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         )
         if not fname:
             return
@@ -124,30 +145,26 @@ def show_activity_log_screen(parent, admin_id=None):
                 writer = csv.writer(f)
                 writer.writerow(heads)
                 writer.writerows(rows)
-            log_action("ADMIN", admin_id, "ACTIVITY_LOG_EXPORTED",
-                       f"Exported {len(rows)} log entries to {fname}")
-            show_success("Exported", f"Saved to:\n{fname}")
+            log_action("ADMIN", admin_id, "ACTIVITY_LOG_EXPORTED", f"Exported {len(rows)} logs to {fname}")
+            show_success("Export Complete", f"Audit logs saved to:\n{fname}")
         except Exception as e:
             show_error("Export Error", str(e))
 
     def clear_old_logs():
-        if not ask_confirm("Confirm",
-                           "Delete all logs OLDER than 30 days?\n"
-                           "This cannot be undone."):
+        if not ask_confirm(
+            "Purge Historic Logs",
+            "Permanently delete all audit entries older than 30 days?\n\nThis maintenance operation cannot be undone."
+        ):
             return
-        from db import run_query
-        run_query(
-            "DELETE FROM activity_logs WHERE timestamp < datetime('now', '-30 days')"
-        )
-        log_action("ADMIN", admin_id, "ACTIVITY_LOG_CLEANED",
-                   "Cleared logs older than 30 days")
-        show_success("Done", "Old logs cleared.")
+
+        run_query("DELETE FROM activity_logs WHERE timestamp < datetime('now', '-30 days')")
+        log_action("ADMIN", admin_id, "ACTIVITY_LOG_CLEANED", "Purged logs older than 30 days")
+        show_success("Purge Complete", "Audit log entries older than 30 days have been cleared.")
         refresh()
 
-    # ---------- Buttons ----------
-    primary_button(btn_row, "Apply Filters", refresh,        width=14).grid(row=0, column=0, padx=5)
-    neutral_button(btn_row, "Clear Filters", clear_filters,  width=14).grid(row=0, column=1, padx=5)
-    success_button(btn_row, "Export CSV",    export_csv,     width=14).grid(row=0, column=2, padx=5)
-    primary_button(btn_row, "Cleanup 30d",   clear_old_logs, width=14).grid(row=0, column=3, padx=5)
+    user_combo.bind("<<ComboboxSelected>>", lambda e: refresh())
+    limit_combo.bind("<<ComboboxSelected>>", lambda e: refresh())
+    action_entry.bind("<Return>", lambda e: refresh())
+    date_entry.bind("<Return>", lambda e: refresh())
 
     refresh()
